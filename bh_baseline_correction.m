@@ -6,31 +6,20 @@ function Y = bh_baseline_correction(X, t, tw, btype)
 %	X     - matrix or vector with time in the first dimension
 %	t     - vector with time information
 %	tw    - baseline time window [min max]
-%	btype - baseline type: 
-%	   'absolute' (default): - same results for averaing trials before or after baseline correction 
-%	                         - scaling: minmax = [-inf inf]; is 0 for X == B
-%	                         - provides the different results for X and X.^2, i.e. for amplitude and power
-%                          - according to Cohen MX (2014, Analyzing neural time series data. The MIT Press), this baseline does not adress 1/f power-law scaling
+%	btype - baseline type (B = mean of X in the baseline window):
+%	   'absolute' (default): X - B
+%	   'relative':           X ./ B
+%	   'relchange':          (X - B) ./ B
+%	   'meanlogP':           10*log10(X) minus its baseline mean (power; recommended for dB)
+%	   'meanlogA':           20*log10(X) minus its baseline mean (amplitude)
+%	   'decibelP':           10*log10(X ./ B)  (power; negatively biased, see below)
+%	   'decibelA':           20*log10(X ./ B)  (amplitude; negatively biased)
 %
-%	   'relative': - same results for averaing trials before or after baseline correction
-%	               - scaling: minmax = [0 inf]; is 1 for X == B
-%	               - provides the same results for X and X.^2, i.e. for amplitude and power
-%
-%	   'relchange': - same results for averaing trials before or after baseline correction
-%	                - scaling: minmax = [-1 inf]; is 0 for X == B
-%	                - provides the different results for X and X.^2, i.e. for amplitude and power
-%
-%	   'decibelP': - is defined only for power values
-%	               - different results for averaing trials before or after baseline correction
-%	               - scaling: minmax = [-inf inf]; is 0 for X == B
-%	               - provides the different results for X and X.^2, i.e. for amplitude and power (but is only defined for power anyways)
-%                - don't use it on single trials (Cohen MX, 2014, Analyzing neural time series data. The MIT Press.)
-%
-%	   'decibelA': - is defined only for amplitude values
-%	               - different results for averaing trials before or after baseline correction
-%	               - scaling: minmax = [-inf inf]; is 0 for X == B
-%	               - provides the different results for X and X.^2, i.e. for amplitude and power (but is only defined for amplitude anyways)
-%                - don't use it on single trials (Cohen MX, 2014, Analyzing neural time series data. The MIT Press.)
+% Notes:
+%	- Only 'absolute' gives the same result whether trials are averaged before or after correction.
+%	- 'decibelP'/'decibelA' are negatively biased: they show decreases relative to baseline
+%	  even when there is no change (Kinley et al., 2026, J Neurosci Methods 434:110826).
+%	  'meanlogP'/'meanlogA' (mean-log-ratio) avoid this and are otherwise interpreted the same way.
 %
 % Output:
 %	Y - baseline-corrected data matrix
@@ -53,33 +42,31 @@ function Y = bh_baseline_correction(X, t, tw, btype)
 %    along with this program.  If not, see <http://www.gnu.org/licenses/>.
 %
 % --------------------------------------------------------------------
-% B. Herrmann, email: herrmann.b@gmail.com, 2012-02-16
+% B. Herrmann, email: herrmann.b@gmail.com, 2012-02-16 (updated 2026)
+
 
 % check inputs
-Y = [];
-if nargin < 3, fprintf('Error: Not enough inputs provided!\n'); return; end
+if nargin < 3, error('Not enough inputs provided!'); end
 if nargin < 4 || isempty(btype), btype = 'absolute'; end
-if ~ismember(btype,{'absolute' 'relative' 'relchange' 'decibelP' 'decibelA'}), fprintf('Info: Unsupported method! ''absolute'' will be used!\n'); btype = 'absolute'; end
-if numel(tw) ~= 2, fprintf('Error: tw only allows two values!\n'); return; end
+if numel(tw) ~= 2, error('tw only allows two values!'); end
 if isvector(X), X = X(:); end
 
+% log-transform first for mean-log-ratio, then treat as absolute baseline
+if strcmp(btype, 'meanlogP'), X = 10 .* log10(X); btype = 'absolute'; end
+if strcmp(btype, 'meanlogA'), X = 20 .* log10(X); btype = 'absolute'; end
 
 % get baseline matrix
-tsamp = tw(1) <= t & tw(2) >= t;
+tsamp = t >= min(tw) & t <= max(tw);
+if numel(t) ~= size(X,1) || ~any(tsamp), error('t must match size(X,1), and tw must contain time points.'); end
 siz   = size(X);
 B     = repmat(reshape(mean(X(tsamp,:),1),[1 siz(2:end)]),[siz(1) ones(1,numel(siz)-1)]);
 
 % do baseline correction
-if strcmp(btype, 'absolute')
-	Y = X - B;
-elseif strcmp(btype, 'relative')
-	Y = X ./ B;
-elseif strcmp(btype, 'relchange')
-	Y = (X - B) ./ B;
-elseif strcmp(btype, 'decibelP')
-	Y = 10 .* log10(X ./ B);
-elseif strcmp(btype, 'decibelA')
-	Y = 20 .* log10(X ./ B);
+switch btype
+	case 'absolute',  Y = X - B;
+	case 'relative',  Y = X ./ B;
+	case 'relchange', Y = (X - B) ./ B;
+	case 'decibelP',  Y = 10 .* log10(X ./ B);
+	case 'decibelA',  Y = 20 .* log10(X ./ B);
+	otherwise, error('Unsupported baseline type: %s', btype);
 end
-
-return;
